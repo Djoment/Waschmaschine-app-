@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WashMaster App</title>
+    <!-- TensorFlow.js & MobileNet (Lokale KI ohne API Key) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+    
     <!-- Google Font & FontAwesome Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,7 +82,6 @@
             font-size: 13px;
         }
 
-        /* Dropdown mit Emojis */
         .select-wrapper {
             position: relative;
             width: 100%;
@@ -124,7 +127,6 @@
             font-size: 13px;
         }
 
-        /* Buttons */
         button {
             width: 100%;
             padding: 12px;
@@ -151,7 +153,15 @@
             border: 1px solid rgba(56, 189, 248, 0.3);
         }
 
-        /* Freie Zeiteingabe */
+        #imgPreview {
+            width: 100%;
+            max-height: 200px;
+            object-fit: cover;
+            border-radius: 10px;
+            display: none;
+            margin-top: 10px;
+        }
+
         .time-input-group {
             display: flex;
             gap: 8px;
@@ -183,7 +193,6 @@
             border-radius: 8px;
         }
 
-        /* Timer-Anzeige */
         .timer-display {
             text-align: center;
             font-size: 40px;
@@ -250,13 +259,14 @@
         <h1>WashMaster</h1>
     </div>
 
-    <!-- KI Scanner Section -->
+    <!-- Lokale KI Scanner Section -->
     <div class="card">
         <button class="btn-ai" onclick="document.getElementById('cameraInput').click()">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> Wäsche scannen (KI-Analyse)
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Wäsche scannen (Lokale KI)
         </button>
-        <input type="file" id="cameraInput" accept="image/*" capture="environment" onchange="analyzeLaundry(event)">
-        <div id="aiResult" style="display:none; font-size:12px; color:#38bdf8; margin-top:8px; text-align:center;"></div>
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" onchange="processImage(event)">
+        <img id="imgPreview" alt="Vorschau">
+        <div id="aiStatus" style="font-size:12px; color:#38bdf8; margin-top:8px; text-align:center;">KI wird im Hintergrund geladen...</div>
     </div>
 
     <!-- Manual Selection -->
@@ -312,7 +322,6 @@
         
         <div class="timer-display" id="timeDisplay">03:35:00</div>
         
-        <!-- Freie Zeiteingabe in Minuten -->
         <div class="time-input-group">
             <input type="number" id="customMinutes" placeholder="Minuten" min="1" max="600">
             <button class="btn-set-time" onclick="setCustomTime()">Zeit setzen</button>
@@ -363,9 +372,74 @@
     let totalSeconds = 0;
     let initialSeconds = 0;
     let isRunning = false;
+    let model = null;
 
-    // API Key direkt aus deinem Screenshot
-    const GEMINI_API_KEY = "AQ.Ab8RN6JOQ17gjfOuhGww80tQrsDeJK48";
+    async function loadModel() {
+        try {
+            if (typeof mobilenet !== 'undefined') {
+                model = await mobilenet.load();
+                document.getElementById('aiStatus').innerText = "✨ KI bereit! Fotografiere deine Wäsche.";
+            } else {
+                document.getElementById('aiStatus').innerText = "⏳ Lade KI-Bibliotheken...";
+                setTimeout(loadModel, 1000);
+            }
+        } catch (e) {
+            console.error(e);
+            document.getElementById('aiStatus').innerText = "⚠️ KI wird geladen, bitte kurz warten...";
+        }
+    }
+
+    async function processImage(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const imgElement = document.getElementById('imgPreview');
+        const status = document.getElementById('aiStatus');
+
+        imgElement.onload = async () => {
+            status.innerText = "⏳ KI analysiert Wäschestück...";
+            try {
+                if (!model) {
+                    status.innerText = "⏳ KI-Modell lädt noch, bitte einen Moment...";
+                    await loadModel();
+                }
+
+                if (model) {
+                    const predictions = await model.classify(imgElement);
+                    if (predictions && predictions.length > 0) {
+                        const topResult = predictions[0].className.toLowerCase();
+                        const confidence = Math.round(predictions[0].probability * 100);
+
+                        status.innerText = `✨ Erkannt: ${predictions[0].className} (${confidence}%)`;
+
+                        const programSelect = document.getElementById('programSelect');
+                        if (topResult.includes('jean') || topResult.includes('pant') || topResult.includes('trousers')) {
+                            programSelect.value = "90";
+                        } else if (topResult.includes('shirt') || topResult.includes('jersey') || topResult.includes('cardigan')) {
+                            programSelect.value = "80";
+                        } else if (topResult.includes('towel') || topResult.includes('quilt') || topResult.includes('pillow')) {
+                            programSelect.value = "120";
+                        } else if (topResult.includes('wool') || topResult.includes('sweater') || topResult.includes('velvet')) {
+                            programSelect.value = "40";
+                        } else {
+                            programSelect.value = "215";
+                        }
+                        updateProgramDetails();
+                    } else {
+                        status.innerText = "❌ Keine klaren Merkmale erkannt. Standard gewählt.";
+                    }
+                } else {
+                    status.innerText = "❌ KI-Modell noch nicht bereit. Bitte erneut versuchen.";
+                }
+            } catch (error) {
+                console.error(error);
+                status.innerText = "❌ Analysefehler. Bitte lade die Seite auf GitHub Pages neu.";
+            }
+        };
+
+        imgElement.src = URL.createObjectURL(file);
+        imgElement.style.display = 'block';
+    }
 
     function updateProgramDetails() {
         if(isRunning) return;
@@ -469,68 +543,10 @@
         }
     }
 
-    async function analyzeLaundry(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const resultDiv = document.getElementById('aiResult');
-        resultDiv.style.display = "block";
-        resultDiv.innerText = "🤖 KI analysiert das Foto...";
-
-        try {
-            const base64Data = await convertBase64(file);
-            const pureBase64 = base64Data.split(',')[1];
-
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: "Analysiere diese Wäsche auf dem Foto. Antworte AUSSCHLIESSLICH mit einem gültigen JSON-Objekt ohne Formatierung oder Markdown-Blöcke. Format: {\"program\": \"90\", \"reason\": \"Jeanswäsche erkannt\"}. Mögliche program-Werte: 215, 190, 165, 110, 45, 30, 20, 105, 60, 40, 150, 80, 90, 120, 100, 75, 95, 50, 85, 70, 140, 25, 15." },
-                            { inline_data: { mime_type: file.type, data: pureBase64 } }
-                        ]
-                    }]
-                })
-            });
-
-            const data = await response.json();
-            
-            if (data.error) {
-                console.error("API Error:", data.error);
-                resultDiv.innerText = `❌ Fehler: ${data.error.message || "API-Zugriff fehlgeschlagen"}`;
-                return;
-            }
-
-            if (!data.candidates || data.candidates.length === 0) {
-                resultDiv.innerText = "❌ Keine Antwort von der KI erhalten.";
-                return;
-            }
-
-            let textResponse = data.candidates[0].content.parts[0].text;
-            textResponse = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
-            const jsonResult = JSON.parse(textResponse);
-
-            resultDiv.innerText = `✨ Erkannt: ${jsonResult.reason}`;
-            document.getElementById('programSelect').value = jsonResult.program;
-            updateProgramDetails();
-
-        } catch (error) {
-            console.error(error);
-            resultDiv.innerText = "❌ Fehler bei der Analyse. Bitte überprüfe das Dateiformat.";
-        }
-    }
-
-    function convertBase64(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
-        });
-    }
-
-    updateProgramDetails();
+    window.addEventListener('load', () => {
+        loadModel();
+        updateProgramDetails();
+    });
 </script>
 
 </body>

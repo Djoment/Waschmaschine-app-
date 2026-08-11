@@ -373,6 +373,7 @@
     let initialSeconds = 0;
     let isRunning = false;
     let model = null;
+    let endTimeTarget = null;
 
     async function loadModel() {
         try {
@@ -464,6 +465,11 @@
         totalSeconds = minutes * 60;
         initialSeconds = totalSeconds;
         
+        if (isRunning) {
+            endTimeTarget = Date.now() + (totalSeconds * 1000);
+            saveState();
+        }
+        
         updateTimerDisplay();
         calculateEndTime();
         customInput.value = '';
@@ -478,16 +484,15 @@
             `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
             
         if(initialSeconds > 0) {
-            const progressPercent = ((initialSeconds - totalSeconds) / initialSeconds) * 100;
+            const progressPercent = Math.min(100, Math.max(0, ((initialSeconds - totalSeconds) / initialSeconds) * 100));
             document.getElementById('progressBar').style.width = `${progressPercent}%`;
         }
     }
 
     function calculateEndTime() {
-        const now = new Date();
-        now.setSeconds(now.getSeconds() + totalSeconds);
-        const hours = String(now.getHours()).padStart(2, '0');
-        const minutes = String(now.getMinutes()).padStart(2, '0');
+        let target = endTimeTarget ? new Date(endTimeTarget) : new Date(Date.now() + (totalSeconds * 1000));
+        const hours = String(target.getHours()).padStart(2, '0');
+        const minutes = String(target.getMinutes()).padStart(2, '0');
         document.getElementById('endTimeDisplay').innerText = `Fertig um: ${hours}:${minutes} Uhr`;
     }
 
@@ -511,6 +516,79 @@
         osc.stop(audioCtx.currentTime + 1.5);
     }
 
+    function saveState() {
+        if (isRunning && endTimeTarget) {
+            localStorage.setItem('washmaster_endTime', endTimeTarget);
+            localStorage.setItem('washmaster_initialSeconds', initialSeconds);
+            localStorage.setItem('washmaster_program', document.getElementById('programSelect').value);
+        } else {
+            localStorage.removeItem('washmaster_endTime');
+            localStorage.removeItem('washmaster_initialSeconds');
+            localStorage.removeItem('washmaster_program');
+        }
+    }
+
+    function restoreState() {
+        const savedEndTime = localStorage.getItem('washmaster_endTime');
+        const savedInitial = localStorage.getItem('washmaster_initialSeconds');
+        const savedProgram = localStorage.getItem('washmaster_program');
+
+        if (savedEndTime && savedInitial) {
+            endTimeTarget = parseInt(savedEndTime);
+            initialSeconds = parseInt(savedInitial);
+            
+            if (savedProgram) {
+                document.getElementById('programSelect').value = savedProgram;
+            }
+
+            const remaining = Math.round((endTimeTarget - Date.now()) / 1000);
+
+            if (remaining > 0) {
+                totalSeconds = remaining;
+                isRunning = true;
+                const startIcon = document.getElementById('startIcon');
+                const btnText = document.getElementById('btnText');
+                btnText.innerText = "Pausieren";
+                startIcon.className = "fa-solid fa-pause";
+                
+                startTimerInterval();
+            } else {
+                totalSeconds = 0;
+                updateTimerDisplay();
+                document.getElementById('btnText').innerText = "Fertig!";
+                document.getElementById('startIcon').className = "fa-solid fa-check";
+                localStorage.removeItem('washmaster_endTime');
+            }
+        }
+    }
+
+    function startTimerInterval() {
+        clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            if (endTimeTarget) {
+                totalSeconds = Math.max(0, Math.round((endTimeTarget - Date.now()) / 1000));
+            } else {
+                totalSeconds--;
+            }
+
+            if (totalSeconds > 0) {
+                updateTimerDisplay();
+                calculateEndTime();
+            } else {
+                clearInterval(timerInterval);
+                isRunning = false;
+                endTimeTarget = null;
+                saveState();
+                
+                document.getElementById('btnText').innerText = "Fertig!";
+                document.getElementById('startIcon').className = "fa-solid fa-check";
+                updateTimerDisplay();
+                playAlarm();
+                alert("🔔 Die Wäsche ist fertig!");
+            }
+        }, 1000);
+    }
+
     function toggleTimer() {
         const startIcon = document.getElementById('startIcon');
         const btnText = document.getElementById('btnText');
@@ -518,34 +596,28 @@
         if (isRunning) {
             clearInterval(timerInterval);
             isRunning = false;
+            endTimeTarget = null;
+            saveState();
             btnText.innerText = "Fortsetzen";
             startIcon.className = "fa-solid fa-play";
         } else {
             if (totalSeconds <= 0) return;
             isRunning = true;
+            endTimeTarget = Date.now() + (totalSeconds * 1000);
+            saveState();
+            
             btnText.innerText = "Pausieren";
             startIcon.className = "fa-solid fa-pause";
             calculateEndTime();
             
-            timerInterval = setInterval(() => {
-                if (totalSeconds > 0) {
-                    totalSeconds--;
-                    updateTimerDisplay();
-                } else {
-                    clearInterval(timerInterval);
-                    isRunning = false;
-                    btnText.innerText = "Fertig!";
-                    startIcon.className = "fa-solid fa-check";
-                    playAlarm();
-                    alert("🔔 Die Wäsche ist fertig!");
-                }
-            }, 1000);
+            startTimerInterval();
         }
     }
 
     window.addEventListener('load', () => {
         loadModel();
         updateProgramDetails();
+        restoreState();
     });
 </script>
 
